@@ -1,0 +1,15 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 500
+solc = "0.8.28"
+gas_reports = ["TossGame"]
+viaIR = true
+
+[profile.test]
+verbosity = 2
+gas_price = 1000000000
+
+[profile.ci]
