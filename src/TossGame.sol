@@ -5,15 +5,13 @@ import {OwnableUpgradeable} from "openzeppelin-contracts-upgradeable/contracts/a
 import {UUPSUpgradeable} from "openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20Permit} from "openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import {IAdapter} from "randcast-user-contract/interfaces/IAdapter.sol";
+import {IAdapter, IRequestTypeBase} from "randcast-user-contract/interfaces/IAdapter.sol";
 import {RequestIdBase} from "randcast-user-contract/utils/RequestIdBase.sol";
-import {BasicRandcastConsumerBase} from "randcast-user-contract/user/BasicRandcastConsumerBase.sol";
 import {EIP712Upgradeable} from "openzeppelin-contracts-upgradeable/contracts/utils/cryptography/EIP712Upgradeable.sol";
 import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 
 contract TossGame is
     RequestIdBase,
-    BasicRandcastConsumerBase,
     UUPSUpgradeable,
     OwnableUpgradeable,
     EIP712Upgradeable
@@ -29,6 +27,7 @@ contract TossGame is
     uint64 private _contractSubId;
     uint16 private _requestConfirmations;
     uint16 private _tossFeeBPS;
+    address private _adapter;
     address private _operator;
     LeaderboardEntry[] private leaderboard;
 
@@ -96,13 +95,6 @@ contract TossGame is
         uint64 freeRequestCount;
         uint64 reqCountInCurrentPeriod;
         uint256 lastRequestTimestamp;
-    }
-
-    struct FeeConfig {
-        uint16 flatFeePromotionGlobalPercentage;
-        bool isFlatFeePromotionEnabledPermanently;
-        uint256 flatFeePromotionStartTimestamp;
-        uint256 flatFeePromotionEndTimestamp;
     }
 
     // User stats structure
@@ -195,22 +187,23 @@ contract TossGame is
         );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address adapter) BasicRandcastConsumerBase(adapter) {
+    constructor() {
         _disableInitializers();
     }
 
-    function initialize(address operator) public initializer {
+    function initialize(address adapter, address operator) public initializer {
         __Ownable_init(msg.sender);
         __EIP712_init("TossGame", "1"); // Initialize EIP712
 
+        _adapter = adapter;
         _operator = operator;
 
         // Create subscription for the contract
-        _contractSubId = IAdapter(adapter).createSubscription();
+        _contractSubId = IAdapter(_adapter).createSubscription();
 
-        IAdapter(adapter).addConsumer(_contractSubId, address(this));
+        IAdapter(_adapter).addConsumer(_contractSubId, address(this));
 
-        (_requestConfirmations, , , , , , ) = IAdapter(adapter)
+        (_requestConfirmations, , , , , , ) = IAdapter(_adapter)
             .getAdapterConfig();
 
         emit OperatorSet(operator);
@@ -549,7 +542,7 @@ contract TossGame is
 
         uint32 overhead = _calculateFulfillFeeOverhead();
 
-        uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
+        uint256 estimatedFee = IAdapter(_adapter).estimatePaymentAmountInETH(
             callbackGasLimit,
             overhead,
             0,
@@ -573,7 +566,7 @@ contract TossGame is
         bool tossResult
     ) internal returns (bytes32 requestId) {
         requestId = _rawRequestRandomness(
-            RequestType.Randomness,
+            IRequestTypeBase.RequestType.Randomness,
             "",
             _contractSubId,
             block.timestamp,
@@ -600,6 +593,37 @@ contract TossGame is
             tokenAmountToToss,
             tossResult
         );
+    }
+
+    function _rawRequestRandomness(
+        IRequestTypeBase.RequestType requestType,
+        bytes memory params,
+        uint64 subId,
+        uint256 seed,
+        uint16 requestConfirmations,
+        uint32 callbackGasLimit,
+        uint256 callbackMaxGasPrice
+    ) internal returns (bytes32) {
+        IAdapter.RandomnessRequestParams memory p = IAdapter
+            .RandomnessRequestParams(
+                requestType,
+                params,
+                subId,
+                seed,
+                requestConfirmations,
+                callbackGasLimit,
+                callbackMaxGasPrice
+            );
+
+        return IAdapter(_adapter).requestRandomness(p);
+    }
+
+    function rawFulfillRandomness(
+        bytes32 requestId,
+        uint256 randomness
+    ) external {
+        require(msg.sender == _adapter, "Only adapter can fulfill");
+        _fulfillRandomness(requestId, randomness);
     }
 
     function _verifyTossCoinSignature(
@@ -667,7 +691,7 @@ contract TossGame is
      */
     function _fundSubscription(uint256 amount) internal {
         if (amount > 0) {
-            IAdapter(adapter).fundSubscription{value: amount}(_contractSubId);
+            IAdapter(_adapter).fundSubscription{value: amount}(_contractSubId);
 
             emit SubscriptionFunded(amount);
         }
@@ -686,7 +710,7 @@ contract TossGame is
             ,
             sub.reqCountInCurrentPeriod,
             sub.lastRequestTimestamp
-        ) = IAdapter(adapter).getSubscription(subId);
+        ) = IAdapter(_adapter).getSubscription(subId);
     }
 
     function _calculateCallbackGasLimit()
@@ -708,7 +732,7 @@ contract TossGame is
     function _fulfillRandomness(
         bytes32 requestId,
         uint256 randomness
-    ) internal override {
+    ) internal {
         RequestData memory request = pendingRequests[requestId];
         bool tossResult = randomness % 2 == 0;
 

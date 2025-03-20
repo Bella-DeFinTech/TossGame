@@ -8,8 +8,8 @@ import {MockAdapter} from "./mocks/MockAdapter.sol";
 import {ERC1967Proxy} from "openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract TossGameTest is Test {
-    TossGame public game_impl;
-    ERC1967Proxy public game_proxy;
+    TossGame public gameImpl;
+    ERC1967Proxy public gameProxy;
     TossGame public game;
 
     MockERC20 public token;
@@ -72,13 +72,17 @@ contract TossGameTest is Test {
 
         // Deploy and initialize game contract
 
-        game_impl = new TossGame(address(adapter));
-        game_proxy = new ERC1967Proxy(
-            address(game_impl),
-            abi.encodeWithSignature("initialize(address)", operator)
+        gameImpl = new TossGame();
+        gameProxy = new ERC1967Proxy(
+            address(gameImpl),
+            abi.encodeWithSignature(
+                "initialize(address,address)",
+                address(adapter),
+                operator
+            )
         );
 
-        game = TossGame(address(game_proxy));
+        game = TossGame(address(gameProxy));
 
         // Add token support
         vm.prank(game.owner());
