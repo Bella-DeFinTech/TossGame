@@ -48,11 +48,9 @@ contract TossGameLocalTestScript is Script {
         token.mint(deployer, 100_0000 ether);
 
         // Fund subscription
-        uint64 subId = adapter.createSubscription();
+        uint64 subId = tossGame.getContractSubId();
 
         adapter.fundSubscription{value: plentyOfEthBalance}(subId);
-
-        adapter.addConsumer(subId, address(tossGameProxy));
 
         vm.stopBroadcast();
     }

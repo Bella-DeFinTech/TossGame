@@ -23,7 +23,21 @@ contract TossGame is
     uint32 public constant DEPOSIT_OPERATOR_GAS_OVERHEAD = 120000;
     uint32 public constant WITHDRAW_OPERATOR_GAS_OVERHEAD = 60000;
     uint32 public constant TOSS_OPERATOR_GAS_OVERHEAD = 220000;
+    uint32 public constant MAX_CALLBACK_GAS_LIMIT = 2000000;
 
+    // Add EIP712 type hashes
+    bytes32 private constant TOSS_TYPEHASH =
+        keccak256(
+            "TossCoin(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline,bool tossResult)"
+        );
+
+    bytes32 private constant WITHDRAW_TYPEHASH =
+        keccak256(
+            "Withdraw(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline)"
+        );
+
+    uint256 private _callbackMaxGasPrice;
+    uint32 private _callbackGasLimit;
     uint64 private _contractSubId;
     uint16 private _requestConfirmations;
     uint16 private _tossFeeBPS;
@@ -164,27 +178,23 @@ contract TossGame is
     error InvalidParameters();
     error InsufficientFundForGasFee(uint256 fundAmount, uint256 requiredAmount);
     error OnlyOperator();
+    error OnlyAdapter();
     error InvalidSignature();
     error InsufficientBalance(uint256 balance, uint256 required);
     error UnsupportedToken(address token);
     error ETHTransferFailed();
     error ERC20TransferFailed();
+    error GasLimitTooBig(uint32 gasLimit, uint32 maxGasLimit);
 
     modifier onlyOperator() {
         if (msg.sender != _operator) revert OnlyOperator();
         _;
     }
 
-    // Add EIP712 type hashes
-    bytes32 private constant TOSS_TYPEHASH =
-        keccak256(
-            "TossCoin(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline,bool tossResult)"
-        );
-
-    bytes32 private constant WITHDRAW_TYPEHASH =
-        keccak256(
-            "Withdraw(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline)"
-        );
+    modifier onlyAdapter() {
+        if (msg.sender != _adapter) revert OnlyAdapter();
+        _;
+    }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -215,6 +225,17 @@ contract TossGame is
     // ==================
     // Admin functions
     // ==================
+
+    function setCallbackGasConfig(
+        uint32 callbackGasLimit,
+        uint256 callbackMaxGasPrice
+    ) external onlyOwner {
+        if (callbackGasLimit > MAX_CALLBACK_GAS_LIMIT) {
+            revert GasLimitTooBig(callbackGasLimit, MAX_CALLBACK_GAS_LIMIT);
+        }
+        _callbackGasLimit = callbackGasLimit;
+        _callbackMaxGasPrice = callbackMaxGasPrice;
+    }
 
     function setTossFeeBPS(uint16 tossFeeBPS) external onlyOwner {
         _tossFeeBPS = tossFeeBPS;
@@ -276,7 +297,7 @@ contract TossGame is
     ) external payable returns (bytes32 requestId) {
         uint256 tossAmount = msg.value;
 
-        uint256 callbackGasFee = estimateCallbackFee();
+        uint256 callbackGasFee = estimateCallbackFee(tx.gasprice * 3);
 
         uint256 tossFee = (tossAmount * _tossFeeBPS) / 10000;
 
@@ -317,7 +338,7 @@ contract TossGame is
         if (!supportedTokens[sig.token]) revert UnsupportedToken(sig.token);
 
         // Calculate total cost including operator's gas
-        uint256 callbackGasFee = estimateCallbackFee();
+        uint256 callbackGasFee = estimateCallbackFee(tx.gasprice * 3);
         uint256 operatorGasFee = TOSS_OPERATOR_GAS_OVERHEAD * tx.gasprice;
         uint256 tossFee = (sig.tokenAmount * _tossFeeBPS) / 10000;
 
@@ -537,7 +558,9 @@ contract TossGame is
         return _tossFeeBPS;
     }
 
-    function estimateCallbackFee() public view returns (uint256 requestFee) {
+    function estimateCallbackFee(
+        uint256 weiPerUnitGas
+    ) public view returns (uint256 requestFee) {
         uint32 callbackGasLimit = _calculateCallbackGasLimit();
 
         uint32 overhead = _calculateFulfillFeeOverhead();
@@ -546,7 +569,7 @@ contract TossGame is
             callbackGasLimit,
             overhead,
             0,
-            tx.gasprice * 3,
+            weiPerUnitGas,
             RANDCAST_GROUP_SIZE
         );
 
@@ -572,7 +595,7 @@ contract TossGame is
             block.timestamp,
             _requestConfirmations,
             _calculateCallbackGasLimit(),
-            tx.gasprice * 3
+            _calculateCallbackMaxGasPrice()
         );
 
         pendingRequests[requestId] = RequestData(
@@ -616,14 +639,6 @@ contract TossGame is
             );
 
         return IAdapter(_adapter).requestRandomness(p);
-    }
-
-    function rawFulfillRandomness(
-        bytes32 requestId,
-        uint256 randomness
-    ) external {
-        require(msg.sender == _adapter, "Only adapter can fulfill");
-        _fulfillRandomness(requestId, randomness);
     }
 
     function _verifyTossCoinSignature(
@@ -715,10 +730,22 @@ contract TossGame is
 
     function _calculateCallbackGasLimit()
         internal
-        pure
+        view
         returns (uint32 gasLimit)
     {
-        gasLimit = (TOSS_CALLBACK_GAS_BASE * 4) / 3;
+        gasLimit = _callbackGasLimit == 0
+            ? (TOSS_CALLBACK_GAS_BASE * 4) / 3
+            : _callbackGasLimit;
+    }
+
+    function _calculateCallbackMaxGasPrice()
+        internal
+        view
+        returns (uint256 maxGasPrice)
+    {
+        maxGasPrice = _callbackMaxGasPrice == 0
+            ? tx.gasprice * 3
+            : _callbackMaxGasPrice;
     }
 
     function _calculateFulfillFeeOverhead()
@@ -727,6 +754,13 @@ contract TossGame is
         returns (uint32 overhead)
     {
         overhead = (TOSS_CALLBACK_GAS_OVERHEAD * 4) / 3;
+    }
+
+    function rawFulfillRandomness(
+        bytes32 requestId,
+        uint256 randomness
+    ) external onlyAdapter {
+        _fulfillRandomness(requestId, randomness);
     }
 
     function _fulfillRandomness(
