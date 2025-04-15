@@ -43,10 +43,9 @@ contract TossGame is
     uint16 private _tossFeeBPS;
     address private _adapter;
     address private _operator;
-    LeaderboardEntry[] private leaderboard;
 
     // Mapping to store user stats
-    mapping(address => UserStats) private userStats;
+    mapping(address => mapping(address => UserStats)) private userStats; // user => token => stats
 
     mapping(address => bool) public supportedTokens;
 
@@ -55,6 +54,8 @@ contract TossGame is
     mapping(address => uint256) public nonces;
 
     mapping(bytes32 => RequestData) public pendingRequests;
+
+    mapping(address => LeaderboardEntry[]) public leaderboards; // token => leaderboard
 
     struct DepositParams {
         address user;
@@ -116,6 +117,7 @@ contract TossGame is
         uint256 winCount;
         uint256 tossCount;
         uint256 prize;
+        int256 profit;
     }
 
     // Leaderboard entry structure
@@ -137,6 +139,8 @@ contract TossGame is
     );
 
     event CoinTossResult(
+        address indexed user,
+        address indexed token,
         bytes32 indexed requestId,
         uint256 amountWon,
         bool tossResult,
@@ -162,13 +166,16 @@ contract TossGame is
     // Events for stats updates
     event StatsUpdated(
         address indexed user,
+        address indexed token,
         uint256 winCount,
         uint256 tossCount,
-        uint256 prize
+        uint256 prize,
+        int256 profit
     );
 
     event LeaderboardUpdated(
         address indexed user,
+        address indexed token,
         uint256 rank,
         uint256 winCount,
         uint256 tossCount,
@@ -532,18 +539,17 @@ contract TossGame is
         return _operator;
     }
 
-    function getLeaderboard()
-        external
-        view
-        returns (LeaderboardEntry[] memory)
-    {
-        return leaderboard;
+    function getLeaderboard(
+        address token
+    ) external view returns (LeaderboardEntry[] memory) {
+        return leaderboards[token];
     }
 
     function getUserStats(
-        address user
+        address user,
+        address token
     ) external view returns (UserStats memory) {
-        return userStats[user];
+        return userStats[user][token];
     }
 
     function getRequestConfirmations() external view returns (uint16) {
@@ -772,14 +778,16 @@ contract TossGame is
 
         uint256 amountWon = 0;
 
+        UserStats storage stats = userStats[request.user][request.token];
+
         // Update toss count
-        userStats[request.user].tossCount++;
+        stats.tossCount++;
 
         bool isWon = request.tossResult == tossResult;
 
         if (isWon) {
             // User wins
-            userStats[request.user].winCount++;
+            stats.winCount++;
 
             amountWon = request.amountToToss;
 
@@ -787,26 +795,48 @@ contract TossGame is
                 request.amountToToss +
                 amountWon;
 
-            userStats[request.user].prize += amountWon;
+            stats.prize += amountWon;
+
+            stats.profit +=
+                int256(amountWon) -
+                int256(request.gasFee) -
+                int256(request.tossFee);
+        } else {
+            stats.profit -=
+                int256(request.amountToToss) +
+                int256(request.gasFee) +
+                int256(request.tossFee);
         }
 
         // Update leaderboard
-        _updateLeaderboard(request.user);
+        _updateLeaderboard(request.user, request.token);
 
         emit StatsUpdated(
             request.user,
-            userStats[request.user].winCount,
-            userStats[request.user].tossCount,
-            userStats[request.user].prize
+            request.token,
+            stats.winCount,
+            stats.tossCount,
+            stats.prize,
+            stats.profit
         );
 
         delete pendingRequests[requestId];
-        emit CoinTossResult(requestId, amountWon, tossResult, isWon);
+
+        emit CoinTossResult(
+            request.user,
+            request.token,
+            requestId,
+            amountWon,
+            tossResult,
+            isWon
+        );
     }
 
     // Internal function to update leaderboard
-    function _updateLeaderboard(address user) internal {
-        UserStats memory stats = userStats[user];
+    function _updateLeaderboard(address user, address token) internal {
+        UserStats memory stats = userStats[user][token];
+
+        LeaderboardEntry[] storage leaderboard = leaderboards[token];
 
         // Find if user is already in leaderboard
         bool found = false;
@@ -849,6 +879,7 @@ contract TossGame is
 
             emit LeaderboardUpdated(
                 user,
+                token,
                 i + 1, // rank (1-based)
                 stats.winCount,
                 stats.tossCount,
@@ -880,6 +911,7 @@ contract TossGame is
 
                 emit LeaderboardUpdated(
                     user,
+                    token,
                     insertIndex + 1, // rank (1-based)
                     stats.winCount,
                     stats.tossCount,
@@ -908,6 +940,7 @@ contract TossGame is
 
                 emit LeaderboardUpdated(
                     user,
+                    token,
                     insertIndex + 1, // rank (1-based)
                     stats.winCount,
                     stats.tossCount,

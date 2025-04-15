@@ -33,6 +33,8 @@ contract TossGameTest is Test {
     );
 
     event CoinTossResult(
+        address indexed user,
+        address indexed token,
         bytes32 indexed requestId,
         uint256 amountWon,
         bool tossResult,
@@ -41,13 +43,16 @@ contract TossGameTest is Test {
 
     event StatsUpdated(
         address indexed user,
+        address indexed token,
         uint256 winCount,
         uint256 tossCount,
-        uint256 prize
+        uint256 prize,
+        int256 profit
     );
 
     event LeaderboardUpdated(
         address indexed user,
+        address indexed token,
         uint256 rank,
         uint256 winCount,
         uint256 tossCount,
@@ -313,28 +318,47 @@ contract TossGameTest is Test {
             tossFee +
             amountToToss;
 
-        vm.expectEmit(true, false, false, true);
-        emit LeaderboardUpdated(user, 1, 1, 1, amountToToss);
+        vm.expectEmit(true, true, false, true);
+        emit LeaderboardUpdated(user, address(token), 1, 1, 1, amountToToss);
 
-        vm.expectEmit(true, false, false, true);
-        emit StatsUpdated(user, 1, 1, amountToToss);
+        vm.expectEmit(true, true, false, true);
+        emit StatsUpdated(
+            user,
+            address(token),
+            1,
+            1,
+            amountToToss,
+            int256(amountToToss - gasFee - tossFee)
+        );
 
         // Expect events
-        vm.expectEmit(true, false, false, true);
-        emit CoinTossResult(requestId, amountToToss, true, true);
+        vm.expectEmit(true, true, true, true);
+        emit CoinTossResult(
+            user,
+            address(token),
+            requestId,
+            amountToToss,
+            true,
+            true
+        );
 
         // Fulfill randomness
         vm.prank(address(adapter));
         game.rawFulfillRandomness(requestId, randomness);
 
         // Verify user stats
-        TossGame.UserStats memory userStats = game.getUserStats(user);
+        TossGame.UserStats memory userStats = game.getUserStats(
+            user,
+            address(token)
+        );
         assertEq(userStats.winCount, 1);
         assertEq(userStats.tossCount, 1);
         assertEq(userStats.prize, amountToToss);
 
         // Verify leaderboard
-        TossGame.LeaderboardEntry[] memory board = game.getLeaderboard();
+        TossGame.LeaderboardEntry[] memory board = game.getLeaderboard(
+            address(token)
+        );
         assertEq(board.length, 1);
         assertEq(board[0].user, user);
         assertEq(board[0].winCount, 1);
@@ -394,27 +418,32 @@ contract TossGameTest is Test {
         uint256 expectedUserTokenBalance = tokenAmountDeposited - tossAmount;
 
         // Expect events
-        vm.expectEmit(true, false, false, true);
-        emit LeaderboardUpdated(user, 1, 0, 1, 0);
+        vm.expectEmit(true, true, false, true);
+        emit LeaderboardUpdated(user, address(token), 1, 0, 1, 0);
 
-        vm.expectEmit(true, false, false, true);
-        emit StatsUpdated(user, 0, 1, 0);
+        vm.expectEmit(true, true, false, true);
+        emit StatsUpdated(user, address(token), 0, 1, 0, -int256(tossAmount));
 
-        vm.expectEmit(true, false, false, true);
-        emit CoinTossResult(requestId, 0, false, false);
+        vm.expectEmit(true, true, true, true);
+        emit CoinTossResult(user, address(token), requestId, 0, false, false);
 
         // Fulfill randomness
         vm.prank(address(adapter));
         game.rawFulfillRandomness(requestId, randomness);
 
         // Verify user stats
-        TossGame.UserStats memory userStats = game.getUserStats(user);
+        TossGame.UserStats memory userStats = game.getUserStats(
+            user,
+            address(token)
+        );
         assertEq(userStats.winCount, 0);
         assertEq(userStats.tossCount, 1);
         assertEq(userStats.prize, 0);
 
         // Verify leaderboard
-        TossGame.LeaderboardEntry[] memory board = game.getLeaderboard();
+        TossGame.LeaderboardEntry[] memory board = game.getLeaderboard(
+            address(token)
+        );
         assertEq(board.length, 1);
         assertEq(board[0].user, user);
         assertEq(board[0].winCount, 0);
