@@ -228,6 +228,11 @@
         "internalType": "struct TossGame.UserStats",
         "components": [
           { "name": "winCount", "type": "uint256", "internalType": "uint256" },
+          {
+            "name": "headsCount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
           { "name": "tossCount", "type": "uint256", "internalType": "uint256" },
           { "name": "prize", "type": "uint256", "internalType": "uint256" },
           { "name": "profit", "type": "int256", "internalType": "int256" }
@@ -731,6 +736,12 @@
       },
       {
         "name": "winCount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "headsCount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
