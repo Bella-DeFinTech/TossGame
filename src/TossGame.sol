@@ -115,6 +115,7 @@ contract TossGame is
     // User stats structure
     struct UserStats {
         uint256 winCount;
+        uint256 headsCount;
         uint256 tossCount;
         uint256 prize;
         int256 profit;
@@ -168,6 +169,7 @@ contract TossGame is
         address indexed user,
         address indexed token,
         uint256 winCount,
+        uint256 headsCount,
         uint256 tossCount,
         uint256 prize,
         int256 profit
@@ -531,36 +533,43 @@ contract TossGame is
         );
     }
 
+    function rawFulfillRandomness(
+        bytes32 requestId,
+        uint256 randomness
+    ) external onlyAdapter {
+        _fulfillRandomness(requestId, randomness);
+    }
+
     // ==================
     // Public view functions
     // ==================
 
-    function getOperator() external view returns (address) {
+    function getOperator() public view returns (address) {
         return _operator;
     }
 
     function getLeaderboard(
         address token
-    ) external view returns (LeaderboardEntry[] memory) {
+    ) public view returns (LeaderboardEntry[] memory) {
         return leaderboards[token];
     }
 
     function getUserStats(
         address user,
         address token
-    ) external view returns (UserStats memory) {
+    ) public view returns (UserStats memory) {
         return userStats[user][token];
     }
 
-    function getRequestConfirmations() external view returns (uint16) {
+    function getRequestConfirmations() public view returns (uint16) {
         return _requestConfirmations;
     }
 
-    function getContractSubId() external view returns (uint64) {
+    function getContractSubId() public view returns (uint64) {
         return _contractSubId;
     }
 
-    function getTossFeeBPS() external view returns (uint16) {
+    function getTossFeeBPS() public view returns (uint16) {
         return _tossFeeBPS;
     }
 
@@ -762,13 +771,6 @@ contract TossGame is
         overhead = (TOSS_CALLBACK_GAS_OVERHEAD * 4) / 3;
     }
 
-    function rawFulfillRandomness(
-        bytes32 requestId,
-        uint256 randomness
-    ) external onlyAdapter {
-        _fulfillRandomness(requestId, randomness);
-    }
-
     function _fulfillRandomness(
         bytes32 requestId,
         uint256 randomness
@@ -784,6 +786,10 @@ contract TossGame is
         stats.tossCount++;
 
         bool isWon = request.tossResult == tossResult;
+
+        if (request.tossResult) {
+            stats.headsCount++;
+        }
 
         if (isWon) {
             // User wins
@@ -815,6 +821,7 @@ contract TossGame is
             request.user,
             request.token,
             stats.winCount,
+            stats.headsCount,
             stats.tossCount,
             stats.prize,
             stats.profit

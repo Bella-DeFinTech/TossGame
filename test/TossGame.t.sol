@@ -45,6 +45,7 @@ contract TossGameTest is Test {
         address indexed user,
         address indexed token,
         uint256 winCount,
+        uint256 headsCount,
         uint256 tossCount,
         uint256 prize,
         int256 profit
@@ -280,7 +281,7 @@ contract TossGameTest is Test {
         );
 
         uint256 tossAmount = 100000 * 1e18;
-        bool userTossResult = true; // User bets on true
+        bool userTossResult = true; // User bets on heads
         bytes32 requestId = _tossCoin(tossAmount, userTossResult);
 
         // Get request data before fulfillment
@@ -311,7 +312,7 @@ contract TossGameTest is Test {
         assertEq(tossResult, userTossResult);
 
         // Mock randomness that matches user's bet (win scenario)
-        uint256 randomness = 2; // Even number, so tossResult will be true
+        uint256 randomness = 2; // Even number, so tossResult will be heads
 
         uint256 expectedUserTokenBalance = tokenAmountDeposited -
             gasFee -
@@ -325,6 +326,7 @@ contract TossGameTest is Test {
         emit StatsUpdated(
             user,
             address(token),
+            1,
             1,
             1,
             amountToToss,
@@ -382,7 +384,7 @@ contract TossGameTest is Test {
         );
 
         uint256 tossAmount = 100000 * 1e18;
-        bool userTossResult = true; // User bets on true
+        bool userTossResult = true; // User bets on heads
         bytes32 requestId = _tossCoin(tossAmount, userTossResult);
 
         // Get request data before fulfillment
@@ -413,7 +415,7 @@ contract TossGameTest is Test {
         assertEq(tossResult, userTossResult);
 
         // Mock randomness that doesn't match user's bet (lose scenario)
-        uint256 randomness = 1; // Odd number, so tossResult will be false
+        uint256 randomness = 1; // Odd number, so tossResult will be tails
 
         uint256 expectedUserTokenBalance = tokenAmountDeposited - tossAmount;
 
@@ -422,7 +424,15 @@ contract TossGameTest is Test {
         emit LeaderboardUpdated(user, address(token), 1, 0, 1, 0);
 
         vm.expectEmit(true, true, false, true);
-        emit StatsUpdated(user, address(token), 0, 1, 0, -int256(tossAmount));
+        emit StatsUpdated(
+            user,
+            address(token),
+            0,
+            1,
+            1,
+            0,
+            -int256(tossAmount)
+        );
 
         vm.expectEmit(true, true, true, true);
         emit CoinTossResult(user, address(token), requestId, 0, false, false);
