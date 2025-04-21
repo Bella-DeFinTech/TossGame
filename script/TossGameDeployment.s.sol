@@ -7,7 +7,7 @@ import {MockERC20} from "../test/mocks/MockERC20.sol";
 import {ERC1967Proxy} from "openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IAdapter} from "Randcast-User-Contract/interfaces/IAdapter.sol";
 
-contract TossGameLocalTestScript is Script {
+contract TossGameDeployment is Script {
     function run() external {
         IAdapter adapter;
         TossGame tossGameImpl;
@@ -20,11 +20,11 @@ contract TossGameLocalTestScript is Script {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
         address operator = vm.envAddress("OPERATOR_ADDRESS");
+        address deployedTokenAddress = vm.envAddress("DEPLOYED_TOKEN_ADDRESS");
 
         adapter = IAdapter(adapterAddress);
 
         vm.startBroadcast(deployerPrivateKey);
-        token = new MockERC20("Test Token", "TEST");
         tossGameImpl = new TossGame();
 
         tossGameProxy = new ERC1967Proxy(
@@ -39,13 +39,10 @@ contract TossGameLocalTestScript is Script {
         tossGame = TossGame(address(tossGameProxy));
 
         // Add token support
-        tossGame.addSupportedToken(address(token));
+        tossGame.addSupportedToken(deployedTokenAddress);
 
         // set TossFeeBPS
         tossGame.setTossFeeBPS(250);
-
-        // Mint tokens to user
-        token.mint(deployer, 100_0000 ether);
 
         // Fund subscription
         uint64 subId = tossGame.getContractSubId();

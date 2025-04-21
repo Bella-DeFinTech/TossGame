@@ -198,7 +198,7 @@ class TossGameOperator:
         tx = self.game.functions.depositTokenWithPermit(params).build_transaction(
             {
                 "from": self.operator.address,
-                "gas": 500000,
+                "gas": 200000,
                 "nonce": self.w3.eth.get_transaction_count(self.operator.address),
             }
         )
@@ -322,18 +322,34 @@ def main():
     operator = TossGameOperator(RPC_URL, OPERATOR_KEY, GAME_ADDRESS, TOKEN_ADDRESS)
 
     # Get user inputs
+    # user_key = os.getenv("USER_KEY")
+    # # Fixed token price for demo (in practice, get from oracle)
+    # token_price = Web3.to_wei(0.00000287528, "ether")  # scaled by 1e18
+
+    # # Execute deposit
+    # amount = 10000
+    # amount_wei = Web3.to_wei(amount, "ether")
+    # operator.deposit(user_key, amount_wei, token_price)
+
+    # Execute toss
+    # amount = 100
+    # amount_wei = Web3.to_wei(amount, "ether")
+    # toss_result = input("Enter toss prediction (heads/tails): ").lower() == "heads"
+    # operator.toss(user_key, amount_wei, token_price, toss_result)
+
+    # Get user inputs
     user_key = os.getenv("USER_KEY")
     # Fixed token price for demo (in practice, get from oracle)
-    token_price = Web3.to_wei(0.00000287528, "ether")  # scaled by 1e18
+    token_price = Web3.to_wei(1e12 / 1635, "ether")  # scaled by 1e18
 
     # Execute deposit
     amount = 10000
-    amount_wei = Web3.to_wei(amount, "ether")
+    amount_wei = Web3.to_wei(amount, "mwei")
     operator.deposit(user_key, amount_wei, token_price)
 
     # Execute toss
     amount = 100
-    amount_wei = Web3.to_wei(amount, "ether")
+    amount_wei = Web3.to_wei(amount, "mwei")
     toss_result = input("Enter toss prediction (heads/tails): ").lower() == "heads"
     operator.toss(user_key, amount_wei, token_price, toss_result)
 
