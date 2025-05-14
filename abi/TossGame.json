@@ -329,9 +329,9 @@
   },
   {
     "type": "function",
-    "name": "resetRequest",
+    "name": "resetRequests",
     "inputs": [
-      { "name": "requestId", "type": "bytes32", "internalType": "bytes32" }
+      { "name": "requestIds", "type": "bytes32[]", "internalType": "bytes32[]" }
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
@@ -938,6 +938,7 @@
   },
   { "type": "error", "name": "InvalidInitialization", "inputs": [] },
   { "type": "error", "name": "InvalidParameters", "inputs": [] },
+  { "type": "error", "name": "InvalidRequest", "inputs": [] },
   { "type": "error", "name": "InvalidSignature", "inputs": [] },
   { "type": "error", "name": "NotInitializing", "inputs": [] },
   { "type": "error", "name": "OnlyAdapter", "inputs": [] },
