@@ -9,10 +9,10 @@ from eth_abi import encode
 
 
 class TossGameOperator:
-    def __init__(self, rpc_url, operator_key, game_address, token_address):
+    def __init__(self, rpc_url, operator_key, user_key, game_address, token_address):
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.operator = Account.from_key(operator_key)
-
+        self.user = Account.from_key(user_key)
         # Load contract ABIs
         with open("out/TossGame.sol/TossGame.json") as f:
             game_abi = json.load(f)["abi"]
@@ -179,6 +179,25 @@ class TossGameOperator:
             "nonce": nonce,
         }
 
+    def deposit_eth(self, user_address, amount, max_priority_fee_per_gas=None):
+        """
+        Submit deposit with permit on behalf of user
+        """
+        tx_params = {
+            "from": user_address,
+            "gas": 80000,
+            "value": amount,
+            "nonce": self.w3.eth.get_transaction_count(user_address),
+        }
+        if max_priority_fee_per_gas:
+            tx_params["maxPriorityFeePerGas"] = max_priority_fee_per_gas
+
+        tx = self.game.functions.deposit().build_transaction(tx_params)
+
+        signed_tx = self.w3.eth.account.sign_transaction(tx, self.user.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        return self.w3.eth.wait_for_transaction_receipt(tx_hash)
+
     def deposit_with_permit(self, user_address, amount, token_price, user_signature):
         """
         Submit deposit with permit on behalf of user
@@ -207,11 +226,18 @@ class TossGameOperator:
         tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         return self.w3.eth.wait_for_transaction_receipt(tx_hash)
 
-    def toss_coin(self, user_address, amount, token_price, toss_result, user_signature):
+    def toss_coin(
+        self,
+        user_address,
+        amount,
+        token_price,
+        toss_result,
+        user_signature,
+        max_priority_fee_per_gas=None,
+    ):
         """
         Submit toss on behalf of user
         """
-        # Create tuple matching the struct in the contract
         params = (
             user_address,  # address user
             self.token_address,  # address token
@@ -225,12 +251,16 @@ class TossGameOperator:
             Web3.to_bytes(user_signature["s"]),  # bytes32 s
         )
 
+        tx_params = {
+            "from": self.operator.address,
+            "gas": 500000,
+            "nonce": self.w3.eth.get_transaction_count(self.operator.address),
+        }
+        if max_priority_fee_per_gas:
+            tx_params["maxPriorityFeePerGas"] = max_priority_fee_per_gas
+
         tx = self.game.functions.tossCoinWithSignature(params).build_transaction(
-            {
-                "from": self.operator.address,
-                "gas": 500000,
-                "nonce": self.w3.eth.get_transaction_count(self.operator.address),
-            }
+            tx_params
         )
 
         signed_tx = self.w3.eth.account.sign_transaction(tx, self.operator.key)
@@ -258,7 +288,9 @@ class TossGameOperator:
             f"Deposit successful! Tx hash: {deposit_receipt['transactionHash'].hex()}"
         )
 
-    def toss(self, user_key, amount, token_price, toss_result):
+    def toss(
+        self, user_key, amount, token_price, toss_result, max_priority_fee_per_gas=None
+    ):
         """
         Submit toss on behalf of user
         """
@@ -273,40 +305,28 @@ class TossGameOperator:
         # 2. Submit toss
         print("Submitting toss...")
         toss_receipt = self.toss_coin(
-            user.address, amount, token_price, toss_result, toss_sig
+            user.address,
+            amount,
+            token_price,
+            toss_result,
+            toss_sig,
+            max_priority_fee_per_gas,
         )
         print(f"Toss submitted! Tx hash: {toss_receipt['transactionHash'].hex()}")
 
-    def deposit_and_toss(self, user_key, amount, token_price, toss_result):
-        """Handle complete deposit and toss flow"""
+    def deposit_by_eth(self, user_key, amount, max_priority_fee_per_gas=None):
+        """
+        Submit deposit on behalf of user
+        """
         user = Account.from_key(user_key)
-        deadline = int(time.time()) + 3600  # 1 hour deadline
 
-        # 1. Get permit signature for deposit
-        permit_sig = self.get_permit_signature(
-            user_key, self.game_address, amount, deadline
-        )
-
-        # 2. Submit deposit
         print("Submitting deposit...")
-        deposit_receipt = self.deposit_with_permit(
-            user.address, amount, token_price, permit_sig
+        deposit_receipt = self.deposit_eth(
+            user.address, amount, max_priority_fee_per_gas
         )
         print(
             f"Deposit successful! Tx hash: {deposit_receipt['transactionHash'].hex()}"
         )
-
-        # 3. Get toss signature
-        toss_sig = self.get_toss_signature(
-            user_key, amount, token_price, toss_result, deadline
-        )
-
-        # 4. Submit toss
-        print("Submitting toss...")
-        toss_receipt = self.toss_coin(
-            user.address, amount, token_price, toss_result, toss_sig
-        )
-        print(f"Toss submitted! Tx hash: {toss_receipt['transactionHash'].hex()}")
 
 
 def main():
@@ -315,43 +335,51 @@ def main():
     # Load configuration from environment
     RPC_URL = os.getenv("RPC_URL", "http://localhost:8545")
     OPERATOR_KEY = os.getenv("OPERATOR_KEY")
+    USER_KEY = os.getenv("USER_KEY")
     GAME_ADDRESS = os.getenv("GAME_ADDRESS")
     TOKEN_ADDRESS = os.getenv("TOKEN_ADDRESS")
 
     # Initialize operator
-    operator = TossGameOperator(RPC_URL, OPERATOR_KEY, GAME_ADDRESS, TOKEN_ADDRESS)
+    operator = TossGameOperator(
+        RPC_URL, OPERATOR_KEY, USER_KEY, GAME_ADDRESS, TOKEN_ADDRESS
+    )
 
-    # Get user inputs
-    # user_key = os.getenv("USER_KEY")
-    # # Fixed token price for demo (in practice, get from oracle)
-    # token_price = Web3.to_wei(0.00000287528, "ether")  # scaled by 1e18
+    if TOKEN_ADDRESS != "0x0000000000000000000000000000000000000000":
+        # ERC20Permit
+        # Get user inputs
+        user_key = os.getenv("USER_KEY")
+        # Fixed token price for demo (in practice, get from oracle)
+        token_price = Web3.to_wei(1e12 / 1635, "ether")  # scaled by 1e18
 
-    # # Execute deposit
-    # amount = 10000
-    # amount_wei = Web3.to_wei(amount, "ether")
-    # operator.deposit(user_key, amount_wei, token_price)
+        # Execute deposit
+        amount = 10000
+        amount_wei = Web3.to_wei(amount, "mwei")
+        operator.deposit(user_key, amount_wei, token_price)
 
-    # Execute toss
-    # amount = 100
-    # amount_wei = Web3.to_wei(amount, "ether")
-    # toss_result = input("Enter toss prediction (heads/tails): ").lower() == "heads"
-    # operator.toss(user_key, amount_wei, token_price, toss_result)
+        # Execute toss with ERC20(USDC as example)
+        amount = 100
+        amount_wei = Web3.to_wei(amount, "mwei")
+        toss_result = input("Enter toss prediction (heads/tails): ").lower() == "heads"
+        operator.toss(user_key, amount_wei, token_price, toss_result)
+    else:
+        # ETH
+        user_key = os.getenv("USER_KEY")
+        max_priority_fee_per_gas = int(os.getenv("MAX_PRIORITY_FEE_PER_GAS"))
 
-    # Get user inputs
-    user_key = os.getenv("USER_KEY")
-    # Fixed token price for demo (in practice, get from oracle)
-    token_price = Web3.to_wei(1e12 / 1635, "ether")  # scaled by 1e18
+        token_price = Web3.to_wei(1, "ether")  # scaled by 1e18
 
-    # Execute deposit
-    amount = 10000
-    amount_wei = Web3.to_wei(amount, "mwei")
-    operator.deposit(user_key, amount_wei, token_price)
+        # Execute deposit
+        amount = 0.001
+        amount_wei = Web3.to_wei(amount, "ether")
+        operator.deposit_by_eth(user_key, amount_wei, max_priority_fee_per_gas)
 
-    # Execute toss
-    amount = 100
-    amount_wei = Web3.to_wei(amount, "mwei")
-    toss_result = input("Enter toss prediction (heads/tails): ").lower() == "heads"
-    operator.toss(user_key, amount_wei, token_price, toss_result)
+        # Execute toss with ERC20
+        amount = 0.00001
+        amount_wei = Web3.to_wei(amount, "ether")
+        toss_result = input("Enter toss prediction (heads/tails): ").lower() == "heads"
+        operator.toss(
+            user_key, amount_wei, token_price, toss_result, max_priority_fee_per_gas
+        )
 
 
 if __name__ == "__main__":

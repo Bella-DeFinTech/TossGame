@@ -10,12 +10,7 @@ import {RequestIdBase} from "randcast-user-contract/utils/RequestIdBase.sol";
 import {EIP712Upgradeable} from "openzeppelin-contracts-upgradeable/contracts/utils/cryptography/EIP712Upgradeable.sol";
 import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 
-contract TossGame is
-    RequestIdBase,
-    UUPSUpgradeable,
-    OwnableUpgradeable,
-    EIP712Upgradeable
-{
+contract TossGame is RequestIdBase, UUPSUpgradeable, OwnableUpgradeable, EIP712Upgradeable {
     uint32 public constant LEADERBOARD_SIZE = 10;
     uint32 public constant TOSS_CALLBACK_GAS_BASE = 250000;
     uint32 public constant TOSS_CALLBACK_GAS_OVERHEAD = 550000;
@@ -26,15 +21,13 @@ contract TossGame is
     uint32 public constant MAX_CALLBACK_GAS_LIMIT = 2000000;
 
     // Add EIP712 type hashes
-    bytes32 private constant TOSS_TYPEHASH =
-        keccak256(
-            "TossCoin(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline,bool tossResult)"
-        );
+    bytes32 private constant TOSS_TYPEHASH = keccak256(
+        "TossCoin(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline,bool tossResult)"
+    );
 
-    bytes32 private constant WITHDRAW_TYPEHASH =
-        keccak256(
-            "Withdraw(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline)"
-        );
+    bytes32 private constant WITHDRAW_TYPEHASH = keccak256(
+        "Withdraw(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline)"
+    );
 
     uint256 private _callbackMaxGasPrice;
     uint32 private _callbackGasLimit;
@@ -148,19 +141,13 @@ contract TossGame is
         bool isWon
     );
     event UserDeposit(
-        address indexed user,
-        address indexed token,
-        uint256 tokenAmountSpecified,
-        uint256 tokenAmountDeposited
+        address indexed user, address indexed token, uint256 tokenAmountSpecified, uint256 tokenAmountDeposited
     );
     event OperatorSet(address indexed newOperator);
     event TokenAdded(address indexed token);
     event TokenRemoved(address indexed token);
     event UserWithdraw(
-        address indexed user,
-        address indexed token,
-        uint256 tokenAmountSpecified,
-        uint256 tokenAmountWithdrawn
+        address indexed user, address indexed token, uint256 tokenAmountSpecified, uint256 tokenAmountWithdrawn
     );
     event SubscriptionFunded(uint256 amount);
 
@@ -176,15 +163,11 @@ contract TossGame is
     );
 
     event LeaderboardUpdated(
-        address indexed user,
-        address indexed token,
-        uint256 rank,
-        uint256 winCount,
-        uint256 tossCount,
-        uint256 prize
+        address indexed user, address indexed token, uint256 rank, uint256 winCount, uint256 tossCount, uint256 prize
     );
 
     error InvalidParameters();
+    error InvalidRequest();
     error InsufficientFundForGasFee(uint256 fundAmount, uint256 requiredAmount);
     error OnlyOperator();
     error OnlyAdapter();
@@ -222,8 +205,7 @@ contract TossGame is
 
         IAdapter(_adapter).addConsumer(_contractSubId, address(this));
 
-        (_requestConfirmations, , , , , , ) = IAdapter(_adapter)
-            .getAdapterConfig();
+        (_requestConfirmations,,,,,,) = IAdapter(_adapter).getAdapterConfig();
 
         emit OperatorSet(operator);
     }
@@ -235,10 +217,7 @@ contract TossGame is
     // Admin functions
     // ==================
 
-    function setCallbackGasConfig(
-        uint32 callbackGasLimit,
-        uint256 callbackMaxGasPrice
-    ) external onlyOwner {
+    function setCallbackGasConfig(uint32 callbackGasLimit, uint256 callbackMaxGasPrice) external onlyOwner {
         if (callbackGasLimit > MAX_CALLBACK_GAS_LIMIT) {
             revert GasLimitTooBig(callbackGasLimit, MAX_CALLBACK_GAS_LIMIT);
         }
@@ -250,9 +229,7 @@ contract TossGame is
         _tossFeeBPS = tossFeeBPS;
     }
 
-    function setRequestConfirmations(
-        uint16 requestConfirmations
-    ) external onlyOwner {
+    function setRequestConfirmations(uint16 requestConfirmations) external onlyOwner {
         _requestConfirmations = requestConfirmations;
     }
 
@@ -275,35 +252,30 @@ contract TossGame is
         emit TokenRemoved(token);
     }
 
-    function withdrawTokenByOwner(
-        address token,
-        uint256 amount
-    ) external onlyOwner {
+    function withdrawTokenByOwner(address token, uint256 amount) external onlyOwner {
         if (token == address(0)) {
-            payable(owner()).transfer(amount);
+            (bool success,) = payable(owner()).call{value: amount}("");
+            if (!success) revert ETHTransferFailed();
         } else {
             bool success = IERC20(token).transfer(owner(), amount);
             if (!success) revert ERC20TransferFailed();
         }
     }
 
-    function resetRequest(bytes32 requestId) external onlyOwner {
-        RequestData memory request = pendingRequests[requestId];
+    function resetRequests(bytes32[] calldata requestIds) external onlyOwner {
+        for (uint256 i = 0; i < requestIds.length; i++) {
+            RequestData memory request = pendingRequests[requestIds[i]];
 
-        userBalances[request.user][request.token] +=
-            request.amountToToss +
-            request.gasFee +
-            request.tossFee;
+            userBalances[request.user][request.token] += request.amountToToss + request.gasFee + request.tossFee;
 
-        delete pendingRequests[requestId];
+            delete pendingRequests[requestIds[i]];
+        }
     }
 
     // ==================
     // Public transaction functions
     // ==================
-    function tossCoinByETH(
-        bool tossResult
-    ) external payable returns (bytes32 requestId) {
+    function tossCoinByETH(bool tossResult) external payable returns (bytes32 requestId) {
         uint256 tossAmount = msg.value;
 
         uint256 callbackGasFee = estimateCallbackFee(tx.gasprice * 3);
@@ -311,10 +283,7 @@ contract TossGame is
         uint256 tossFee = (tossAmount * _tossFeeBPS) / 10000;
 
         if (userBalances[msg.sender][address(0)] < callbackGasFee + tossFee) {
-            revert InsufficientBalance(
-                userBalances[msg.sender][address(0)],
-                callbackGasFee + tossFee
-            );
+            revert InsufficientBalance(userBalances[msg.sender][address(0)], callbackGasFee + tossFee);
         }
 
         uint256 amountToToss = tossAmount - callbackGasFee - tossFee;
@@ -329,19 +298,10 @@ contract TossGame is
             _fundSubscription(callbackGasFee);
         }
 
-        requestId = _requestTossCoin(
-            msg.sender,
-            address(0),
-            amountToToss,
-            callbackGasFee,
-            tossFee,
-            tossResult
-        );
+        requestId = _requestTossCoin(msg.sender, address(0), amountToToss, callbackGasFee, tossFee, tossResult);
     }
 
-    function tossCoinWithSignature(
-        TossSignature calldata sig
-    ) external onlyOperator returns (bytes32 requestId) {
+    function tossCoinWithSignature(TossSignature calldata sig) external onlyOperator returns (bytes32 requestId) {
         _verifyTossCoinSignature(sig);
 
         if (!supportedTokens[sig.token]) revert UnsupportedToken(sig.token);
@@ -351,24 +311,17 @@ contract TossGame is
         uint256 operatorGasFee = TOSS_OPERATOR_GAS_OVERHEAD * tx.gasprice;
         uint256 tossFee = (sig.tokenAmount * _tossFeeBPS) / 10000;
 
-        uint256 gasFeeInToken = ((callbackGasFee + operatorGasFee) * 1e18) /
-            sig.tokenPrice;
+        uint256 gasFeeInToken = ((callbackGasFee + operatorGasFee) * 1e18) / sig.tokenPrice;
 
         if (sig.tokenAmount < gasFeeInToken + tossFee) {
-            revert InsufficientFundForGasFee(
-                sig.tokenAmount,
-                gasFeeInToken + tossFee
-            );
+            revert InsufficientFundForGasFee(sig.tokenAmount, gasFeeInToken + tossFee);
         }
 
         uint256 tokenAmountToToss = sig.tokenAmount - gasFeeInToken - tossFee;
 
         // Check token balance
         if (userBalances[sig.user][sig.token] < sig.tokenAmount) {
-            revert InsufficientBalance(
-                userBalances[sig.user][sig.token],
-                sig.tokenAmount
-            );
+            revert InsufficientBalance(userBalances[sig.user][sig.token], sig.tokenAmount);
         }
 
         // Deduct token balance
@@ -381,21 +334,17 @@ contract TossGame is
             _fundSubscription(callbackGasFee);
         }
 
-        requestId = _requestTossCoin(
-            sig.user,
-            sig.token,
-            tokenAmountToToss,
-            gasFeeInToken,
-            tossFee,
-            sig.tossResult
-        );
+        requestId = _requestTossCoin(sig.user, sig.token, tokenAmountToToss, gasFeeInToken, tossFee, sig.tossResult);
     }
 
-    function depositTokenWithPermit(
-        DepositParams calldata params
-    ) external onlyOperator returns (uint256 tokenAmountToDeposit) {
-        if (!supportedTokens[params.token])
+    function depositTokenWithPermit(DepositParams calldata params)
+        external
+        onlyOperator
+        returns (uint256 tokenAmountToDeposit)
+    {
+        if (!supportedTokens[params.token]) {
             revert UnsupportedToken(params.token);
+        }
 
         if (params.deadline < block.timestamp) {
             revert InvalidSignature();
@@ -415,40 +364,23 @@ contract TossGame is
 
         // Execute the permit
         IERC20Permit(params.token).permit(
-            params.user,
-            address(this),
-            params.tokenAmount,
-            params.deadline,
-            params.v,
-            params.r,
-            params.s
+            params.user, address(this), params.tokenAmount, params.deadline, params.v, params.r, params.s
         );
 
-        bool success = IERC20(params.token).transferFrom(
-            params.user,
-            address(this),
-            params.tokenAmount
-        );
+        bool success = IERC20(params.token).transferFrom(params.user, address(this), params.tokenAmount);
         if (!success) revert ERC20TransferFailed();
 
         // Record token balance
         userBalances[params.user][params.token] += tokenAmountToDeposit;
 
-        emit UserDeposit(
-            params.user,
-            params.token,
-            params.tokenAmount,
-            tokenAmountToDeposit
-        );
+        emit UserDeposit(params.user, params.token, params.tokenAmount, tokenAmountToDeposit);
     }
 
     function depositToken(address token, uint256 amount) external {
-        bool success = IERC20(token).transferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
+        bool success = IERC20(token).transferFrom(msg.sender, address(this), amount);
         if (!success) revert ERC20TransferFailed();
+
+        userBalances[msg.sender][token] += amount;
 
         emit UserDeposit(msg.sender, token, amount, amount);
     }
@@ -467,12 +399,13 @@ contract TossGame is
     }
 
     function withdrawTokenByUser(address token, uint256 amount) external {
-        if (userBalances[msg.sender][token] < amount)
+        if (userBalances[msg.sender][token] < amount) {
             revert InsufficientBalance(userBalances[msg.sender][token], amount);
+        }
         userBalances[msg.sender][token] -= amount;
 
         if (token == address(0)) {
-            (bool success, ) = payable(msg.sender).call{value: amount}("");
+            (bool success,) = payable(msg.sender).call{value: amount}("");
             if (!success) revert ETHTransferFailed();
         } else {
             bool success = IERC20(token).transfer(msg.sender, amount);
@@ -482,15 +415,10 @@ contract TossGame is
         emit UserWithdraw(msg.sender, token, amount, amount);
     }
 
-    function withdrawTokenWithSignature(
-        WithdrawSignature calldata params
-    ) external onlyOperator {
+    function withdrawTokenWithSignature(WithdrawSignature calldata params) external onlyOperator {
         // Check token balance
         if (userBalances[params.user][params.token] < params.tokenAmount) {
-            revert InsufficientBalance(
-                userBalances[params.user][params.token],
-                params.tokenAmount
-            );
+            revert InsufficientBalance(userBalances[params.user][params.token], params.tokenAmount);
         }
 
         // Calculate operator gas cost in ETH
@@ -512,31 +440,18 @@ contract TossGame is
         // Transfer tokens
         if (params.token == address(0)) {
             // ETH transfer
-            (bool success, ) = params.user.call{
-                value: params.tokenAmount - gasFeeInToken
-            }("");
+            (bool success,) = payable(params.user).call{value: params.tokenAmount - gasFeeInToken}("");
             if (!success) revert ETHTransferFailed();
         } else {
             // ERC20 transfer
-            bool success = IERC20(params.token).transfer(
-                params.user,
-                params.tokenAmount - gasFeeInToken
-            );
+            bool success = IERC20(params.token).transfer(params.user, params.tokenAmount - gasFeeInToken);
             if (!success) revert ERC20TransferFailed();
         }
 
-        emit UserWithdraw(
-            params.user,
-            params.token,
-            params.tokenAmount,
-            params.tokenAmount - gasFeeInToken
-        );
+        emit UserWithdraw(params.user, params.token, params.tokenAmount, params.tokenAmount - gasFeeInToken);
     }
 
-    function rawFulfillRandomness(
-        bytes32 requestId,
-        uint256 randomness
-    ) external onlyAdapter {
+    function rawFulfillRandomness(bytes32 requestId, uint256 randomness) external onlyAdapter {
         _fulfillRandomness(requestId, randomness);
     }
 
@@ -548,16 +463,11 @@ contract TossGame is
         return _operator;
     }
 
-    function getLeaderboard(
-        address token
-    ) public view returns (LeaderboardEntry[] memory) {
+    function getLeaderboard(address token) public view returns (LeaderboardEntry[] memory) {
         return leaderboards[token];
     }
 
-    function getUserStats(
-        address user,
-        address token
-    ) public view returns (UserStats memory) {
+    function getUserStats(address user, address token) public view returns (UserStats memory) {
         return userStats[user][token];
     }
 
@@ -573,19 +483,13 @@ contract TossGame is
         return _tossFeeBPS;
     }
 
-    function estimateCallbackFee(
-        uint256 weiPerUnitGas
-    ) public view returns (uint256 requestFee) {
+    function estimateCallbackFee(uint256 weiPerUnitGas) public view returns (uint256 requestFee) {
         uint32 callbackGasLimit = _calculateCallbackGasLimit();
 
         uint32 overhead = _calculateFulfillFeeOverhead();
 
         uint256 estimatedFee = IAdapter(_adapter).estimatePaymentAmountInETH(
-            callbackGasLimit,
-            overhead,
-            0,
-            weiPerUnitGas,
-            RANDCAST_GROUP_SIZE
+            callbackGasLimit, overhead, 0, weiPerUnitGas, RANDCAST_GROUP_SIZE
         );
 
         return estimatedFee;
@@ -613,24 +517,9 @@ contract TossGame is
             _calculateCallbackMaxGasPrice()
         );
 
-        pendingRequests[requestId] = RequestData(
-            user,
-            token,
-            gasFee,
-            tossFee,
-            tokenAmountToToss,
-            tossResult
-        );
+        pendingRequests[requestId] = RequestData(user, token, gasFee, tossFee, tokenAmountToToss, tossResult);
 
-        emit CoinTossRequest(
-            user,
-            token,
-            requestId,
-            gasFee,
-            tossFee,
-            tokenAmountToToss,
-            tossResult
-        );
+        emit CoinTossRequest(user, token, requestId, gasFee, tossFee, tokenAmountToToss, tossResult);
     }
 
     function _rawRequestRandomness(
@@ -642,23 +531,14 @@ contract TossGame is
         uint32 callbackGasLimit,
         uint256 callbackMaxGasPrice
     ) internal returns (bytes32) {
-        IAdapter.RandomnessRequestParams memory p = IAdapter
-            .RandomnessRequestParams(
-                requestType,
-                params,
-                subId,
-                seed,
-                requestConfirmations,
-                callbackGasLimit,
-                callbackMaxGasPrice
-            );
+        IAdapter.RandomnessRequestParams memory p = IAdapter.RandomnessRequestParams(
+            requestType, params, subId, seed, requestConfirmations, callbackGasLimit, callbackMaxGasPrice
+        );
 
         return IAdapter(_adapter).requestRandomness(p);
     }
 
-    function _verifyTossCoinSignature(
-        TossSignature calldata sig
-    ) internal returns (bool) {
+    function _verifyTossCoinSignature(TossSignature calldata sig) internal returns (bool) {
         if (sig.deadline < block.timestamp) {
             revert InvalidSignature();
         }
@@ -686,9 +566,7 @@ contract TossGame is
         return true;
     }
 
-    function _verifyWithdrawSignature(
-        WithdrawSignature calldata sig
-    ) internal returns (bool) {
+    function _verifyWithdrawSignature(WithdrawSignature calldata sig) internal returns (bool) {
         if (sig.deadline < block.timestamp) {
             revert InvalidSignature();
         }
@@ -696,13 +574,7 @@ contract TossGame is
         bytes32 digest = _hashTypedDataV4(
             keccak256(
                 abi.encode(
-                    WITHDRAW_TYPEHASH,
-                    sig.user,
-                    sig.token,
-                    sig.tokenAmount,
-                    sig.tokenPrice,
-                    sig.nonce,
-                    sig.deadline
+                    WITHDRAW_TYPEHASH, sig.user, sig.token, sig.tokenAmount, sig.tokenPrice, sig.nonce, sig.deadline
                 )
             )
         );
@@ -727,9 +599,7 @@ contract TossGame is
         }
     }
 
-    function _getSubscription(
-        uint64 subId
-    ) internal view returns (Subscription memory sub) {
+    function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
         (
             ,
             ,
@@ -743,39 +613,25 @@ contract TossGame is
         ) = IAdapter(_adapter).getSubscription(subId);
     }
 
-    function _calculateCallbackGasLimit()
-        internal
-        view
-        returns (uint32 gasLimit)
-    {
-        gasLimit = _callbackGasLimit == 0
-            ? (TOSS_CALLBACK_GAS_BASE * 4) / 3
-            : _callbackGasLimit;
+    function _calculateCallbackGasLimit() internal view returns (uint32 gasLimit) {
+        gasLimit = _callbackGasLimit == 0 ? (TOSS_CALLBACK_GAS_BASE * 4) / 3 : _callbackGasLimit;
     }
 
-    function _calculateCallbackMaxGasPrice()
-        internal
-        view
-        returns (uint256 maxGasPrice)
-    {
-        maxGasPrice = _callbackMaxGasPrice == 0
-            ? tx.gasprice * 3
-            : _callbackMaxGasPrice;
+    function _calculateCallbackMaxGasPrice() internal view returns (uint256 maxGasPrice) {
+        maxGasPrice = _callbackMaxGasPrice == 0 ? tx.gasprice * 3 : _callbackMaxGasPrice;
     }
 
-    function _calculateFulfillFeeOverhead()
-        internal
-        pure
-        returns (uint32 overhead)
-    {
+    function _calculateFulfillFeeOverhead() internal pure returns (uint32 overhead) {
         overhead = (TOSS_CALLBACK_GAS_OVERHEAD * 4) / 3;
     }
 
-    function _fulfillRandomness(
-        bytes32 requestId,
-        uint256 randomness
-    ) internal {
+    function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal {
         RequestData memory request = pendingRequests[requestId];
+
+        if (request.user == address(0)) {
+            revert InvalidRequest();
+        }
+
         bool tossResult = randomness % 2 == 0;
 
         uint256 amountWon = 0;
@@ -797,46 +653,25 @@ contract TossGame is
 
             amountWon = request.amountToToss;
 
-            userBalances[request.user][request.token] +=
-                request.amountToToss +
-                amountWon;
+            userBalances[request.user][request.token] += request.amountToToss + amountWon;
 
             stats.prize += amountWon;
 
-            stats.profit +=
-                int256(amountWon) -
-                int256(request.gasFee) -
-                int256(request.tossFee);
+            stats.profit += int256(amountWon) - int256(request.gasFee) - int256(request.tossFee);
         } else {
-            stats.profit -=
-                int256(request.amountToToss) +
-                int256(request.gasFee) +
-                int256(request.tossFee);
+            stats.profit -= int256(request.amountToToss) + int256(request.gasFee) + int256(request.tossFee);
         }
 
         // Update leaderboard
         _updateLeaderboard(request.user, request.token);
 
         emit StatsUpdated(
-            request.user,
-            request.token,
-            stats.winCount,
-            stats.headsCount,
-            stats.tossCount,
-            stats.prize,
-            stats.profit
+            request.user, request.token, stats.winCount, stats.headsCount, stats.tossCount, stats.prize, stats.profit
         );
 
         delete pendingRequests[requestId];
 
-        emit CoinTossResult(
-            request.user,
-            request.token,
-            requestId,
-            amountWon,
-            tossResult,
-            isWon
-        );
+        emit CoinTossResult(request.user, request.token, requestId, amountWon, tossResult, isWon);
     }
 
     // Internal function to update leaderboard
@@ -858,12 +693,8 @@ contract TossGame is
 
         if (found) {
             // Update existing entry and sort up if needed
-            leaderboard[i] = LeaderboardEntry({
-                user: user,
-                winCount: stats.winCount,
-                tossCount: stats.tossCount,
-                prize: stats.prize
-            });
+            leaderboard[i] =
+                LeaderboardEntry({user: user, winCount: stats.winCount, tossCount: stats.tossCount, prize: stats.prize});
 
             // Sort up if prize increased
             while (i > 0 && leaderboard[i - 1].prize < leaderboard[i].prize) {
@@ -906,10 +737,7 @@ contract TossGame is
                 );
 
                 // Sort up to maintain order
-                while (
-                    insertIndex > 0 &&
-                    leaderboard[insertIndex - 1].prize < stats.prize
-                ) {
+                while (insertIndex > 0 && leaderboard[insertIndex - 1].prize < stats.prize) {
                     LeaderboardEntry memory temp = leaderboard[insertIndex - 1];
                     leaderboard[insertIndex - 1] = leaderboard[insertIndex];
                     leaderboard[insertIndex] = temp;
@@ -935,10 +763,7 @@ contract TossGame is
                 });
 
                 // Sort up to maintain order
-                while (
-                    insertIndex > 0 &&
-                    leaderboard[insertIndex - 1].prize < stats.prize
-                ) {
+                while (insertIndex > 0 && leaderboard[insertIndex - 1].prize < stats.prize) {
                     LeaderboardEntry memory temp = leaderboard[insertIndex - 1];
                     leaderboard[insertIndex - 1] = leaderboard[insertIndex];
                     leaderboard[insertIndex] = temp;

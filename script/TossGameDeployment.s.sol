@@ -13,12 +13,10 @@ contract TossGameDeployment is Script {
         TossGame tossGameImpl;
         ERC1967Proxy tossGameProxy;
         TossGame tossGame;
-        MockERC20 token;
 
         uint256 plentyOfEthBalance = vm.envUint("SUB_FUND_ETH_BAL");
         address adapterAddress = vm.envAddress("ADAPTER_ADDRESS");
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
         address operator = vm.envAddress("OPERATOR_ADDRESS");
         address deployedTokenAddress = vm.envAddress("DEPLOYED_TOKEN_ADDRESS");
 
@@ -28,18 +26,16 @@ contract TossGameDeployment is Script {
         tossGameImpl = new TossGame();
 
         tossGameProxy = new ERC1967Proxy(
-            address(tossGameImpl),
-            abi.encodeWithSignature(
-                "initialize(address,address)",
-                adapterAddress,
-                operator
-            )
+            address(tossGameImpl), abi.encodeWithSignature("initialize(address,address)", adapterAddress, operator)
         );
 
         tossGame = TossGame(address(tossGameProxy));
 
         // Add token support
         tossGame.addSupportedToken(deployedTokenAddress);
+
+        // Add ETH support
+        tossGame.addSupportedToken(address(0));
 
         // set TossFeeBPS
         tossGame.setTossFeeBPS(250);
