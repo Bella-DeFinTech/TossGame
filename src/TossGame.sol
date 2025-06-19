@@ -50,6 +50,8 @@ contract TossGame is RequestIdBase, UUPSUpgradeable, OwnableUpgradeable, EIP712U
 
     mapping(address => LeaderboardEntry[]) public leaderboards; // token => leaderboard
 
+    mapping(address => uint256) public maxTossAmounts; // token => max toss amount
+
     struct DepositParams {
         address user;
         address token;
@@ -177,6 +179,7 @@ contract TossGame is RequestIdBase, UUPSUpgradeable, OwnableUpgradeable, EIP712U
     error ETHTransferFailed();
     error ERC20TransferFailed();
     error GasLimitTooBig(uint32 gasLimit, uint32 maxGasLimit);
+    error MaxTossAmountExceeded(uint256 maxTossAmount, uint256 tossAmount);
 
     modifier onlyOperator() {
         if (msg.sender != _operator) revert OnlyOperator();
@@ -272,11 +275,19 @@ contract TossGame is RequestIdBase, UUPSUpgradeable, OwnableUpgradeable, EIP712U
         }
     }
 
+    function setMaxTossAmount(address token, uint256 maxTossAmount) external onlyOwner {
+        maxTossAmounts[token] = maxTossAmount;
+    }
+
     // ==================
     // Public transaction functions
     // ==================
     function tossCoinByETH(bool tossResult) external payable returns (bytes32 requestId) {
         uint256 tossAmount = msg.value;
+
+        if (maxTossAmounts[address(0)] > 0 && tossAmount > maxTossAmounts[address(0)]) {
+            revert MaxTossAmountExceeded(maxTossAmounts[address(0)], tossAmount);
+        }
 
         uint256 callbackGasFee = estimateCallbackFee(tx.gasprice * 3);
 
@@ -305,6 +316,10 @@ contract TossGame is RequestIdBase, UUPSUpgradeable, OwnableUpgradeable, EIP712U
         _verifyTossCoinSignature(sig);
 
         if (!supportedTokens[sig.token]) revert UnsupportedToken(sig.token);
+
+        if (maxTossAmounts[sig.token] > 0 && sig.tokenAmount > maxTossAmounts[sig.token]) {
+            revert MaxTossAmountExceeded(maxTossAmounts[sig.token], sig.tokenAmount);
+        }
 
         // Calculate total cost including operator's gas
         uint256 callbackGasFee = estimateCallbackFee(tx.gasprice * 3);

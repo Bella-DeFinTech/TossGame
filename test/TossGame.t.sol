@@ -299,6 +299,9 @@ contract TossGameTest is Test {
     function testTossCoinByETH() public {
         vm.txGasPrice(gasPrice);
 
+        vm.prank(game.owner());
+        game.setMaxTossAmount(address(0), 1 * 1e18);
+
         uint256 specifiedDepositETHAmount = 2 * 1e18;
         vm.prank(user);
         game.deposit{value: specifiedDepositETHAmount}();
@@ -325,8 +328,30 @@ contract TossGameTest is Test {
         assertLt(game.userBalances(user, address(0)), specifiedDepositETHAmount);
     }
 
+    function testTossCoinByETHWithMaxTossAmount() public {
+        vm.txGasPrice(gasPrice);
+
+        vm.prank(game.owner());
+        game.setMaxTossAmount(address(0), 1 * 1e18);
+
+        uint256 specifiedDepositETHAmount = 2 * 1e18;
+        vm.prank(user);
+        game.deposit{value: specifiedDepositETHAmount}();
+        assertEq(game.userBalances(user, address(0)), specifiedDepositETHAmount);
+
+        uint256 specifiedTossETHAmount = 2 * 1e18;
+        bool tossResult = true;
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(TossGame.MaxTossAmountExceeded.selector, 1 * 1e18, 2 * 1e18));
+        game.tossCoinByETH{value: specifiedTossETHAmount}(tossResult);
+    }
+
     function testTossCoinByETHWithSignature() public {
         vm.txGasPrice(gasPrice);
+
+        vm.prank(game.owner());
+        game.setMaxTossAmount(address(0), 1 * 1e18);
 
         uint256 specifiedDepositETHAmount = 2 * 1e18;
         vm.prank(user);
@@ -390,8 +415,65 @@ contract TossGameTest is Test {
         assertEq(amountToToss, specifiedTossETHAmount - gasFee - tossFee);
     }
 
+    function testTossCoinByETHWithSignatureWithMaxTossAmount() public {
+        vm.txGasPrice(gasPrice);
+
+        vm.prank(game.owner());
+        game.setMaxTossAmount(address(0), 1 * 1e18);
+
+        uint256 specifiedDepositETHAmount = 2 * 1e18;
+        vm.prank(user);
+        game.deposit{value: specifiedDepositETHAmount}();
+        assertEq(game.userBalances(user, address(0)), specifiedDepositETHAmount);
+
+        uint256 specifiedTossETHAmount = 2 * 1e18;
+        uint256 nonce = game.nonces(user);
+        uint256 deadline = block.timestamp + 1 hours;
+        bool tossResult = true;
+
+        bytes32 digest = _hashTypedDataV4(
+            game,
+            keccak256(
+                abi.encode(
+                    keccak256(
+                        "TossCoin(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline,bool tossResult)"
+                    ),
+                    user,
+                    address(0),
+                    specifiedTossETHAmount,
+                    ethPrice,
+                    nonce,
+                    deadline,
+                    tossResult
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPrivateKey, digest);
+
+        TossGame.TossSignature memory sig = TossGame.TossSignature({
+            user: user,
+            token: address(0),
+            tokenAmount: specifiedTossETHAmount,
+            tokenPrice: ethPrice,
+            nonce: nonce,
+            deadline: deadline,
+            tossResult: tossResult,
+            v: v,
+            r: r,
+            s: s
+        });
+
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(TossGame.MaxTossAmountExceeded.selector, 1 * 1e18, 2 * 1e18));
+        game.tossCoinWithSignature(sig);
+    }
+
     function testTossCoinByERC20TokenWithSignature() public {
         vm.txGasPrice(gasPrice);
+
+        vm.prank(game.owner());
+        game.setMaxTossAmount(address(token), 100000 * 1e18);
 
         uint256 specifiedDepositTokenAmount = 500000 * 1e18;
         uint256 tokenAmountDeposited = _depositTokens(specifiedDepositTokenAmount);
@@ -451,6 +533,58 @@ contract TossGameTest is Test {
         assertEq(requestToken, address(token));
         assertEq(requestTossResult, tossResult);
         assertEq(amountToToss, specifiedTossTokenAmount - gasFee - tossFee);
+    }
+
+    function testTossCoinByERC20TokenWithSignatureWithMaxTossAmount() public {
+        vm.txGasPrice(gasPrice);
+
+        vm.prank(game.owner());
+        game.setMaxTossAmount(address(token), 100000 * 1e18);
+
+        uint256 specifiedDepositTokenAmount = 500000 * 1e18;
+        uint256 tokenAmountDeposited = _depositTokens(specifiedDepositTokenAmount);
+
+        uint256 specifiedTossTokenAmount = 200000 * 1e18;
+        uint256 nonce = game.nonces(user);
+        uint256 deadline = block.timestamp + 1 hours;
+        bool tossResult = true;
+
+        bytes32 digest = _hashTypedDataV4(
+            game,
+            keccak256(
+                abi.encode(
+                    keccak256(
+                        "TossCoin(address user,address token,uint256 tokenAmount,uint256 tokenPrice,uint256 nonce,uint256 deadline,bool tossResult)"
+                    ),
+                    user,
+                    address(token),
+                    specifiedTossTokenAmount,
+                    tokenPrice,
+                    nonce,
+                    deadline,
+                    tossResult
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPrivateKey, digest);
+
+        TossGame.TossSignature memory sig = TossGame.TossSignature({
+            user: user,
+            token: address(token),
+            tokenAmount: specifiedTossTokenAmount,
+            tokenPrice: tokenPrice,
+            nonce: nonce,
+            deadline: deadline,
+            tossResult: tossResult,
+            v: v,
+            r: r,
+            s: s
+        });
+
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(TossGame.MaxTossAmountExceeded.selector, 100000 * 1e18, 200000 * 1e18));
+        game.tossCoinWithSignature(sig);
     }
 
     function testWithdrawETHWithSignature() public {
